@@ -1,0 +1,51 @@
+{
+  "name": "wood-structure-monitor",
+  "version": "1.0.0",
+  "description": "古建筑木结构应力监测系统 - 实时应力云图与结构安全评估",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "build:addon": "cmake-js compile --CD",
+    "rebuild:addon": "cmake-js rebuild --CD",
+    "build:renderer": "webpack --config webpack.renderer.config.js",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build": "npm run build:main && npm run build:renderer && npm run build:addon",
+    "dev:renderer": "webpack serve --config webpack.renderer.config.js --mode development",
+    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "start": "electron .",
+    "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:main\" \"wait-on http://localhost:8080 && electron .\""
+  },
+  "keywords": [
+    "electron",
+    "structural-monitoring",
+    "finite-element",
+    "wood-structure",
+    "stress-analysis"
+  ],
+  "author": "Heritage Conservation Engineering",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "cmake-js": "^7.3.0",
+    "concurrently": "^8.2.2",
+    "css-loader": "^6.9.0",
+    "electron": "^28.1.0",
+    "html-webpack-plugin": "^5.6.0",
+    "style-loader": "^3.3.4",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "wait-on": "^7.2.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "events": "^3.3.0",
+    "node-addon-api": "^7.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "serialport": "^12.0.0"
+  }
+}
