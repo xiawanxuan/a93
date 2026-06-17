@@ -13,6 +13,8 @@ import {
   StressSnapshot,
   AppConfig,
   SafetyStatusCode,
+  RemainingLifeResult,
+  FatigueParams,
 } from '../shared/types';
 
 let mainWindow: BrowserWindow | null = null;
@@ -279,6 +281,16 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.FE_PREDICT_REMAINING_LIFE,
+    (_event: IpcMainInvokeEvent, stressHistory: number[], monitoringDurationYears: number, params?: FatigueParams): RemainingLifeResult => {
+      if (nativeAddon) {
+        return nativeAddon.fePredictRemainingLife(stressHistory, monitoringDurationYears, params);
+      }
+      return generateMockRemainingLife(stressHistory, monitoringDurationYears);
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.SAFETY_EVALUATE,
     (_event: IpcMainInvokeEvent, ...args: any[]) => {
       if (nativeAddon) {
@@ -517,6 +529,74 @@ function generateMockSafetyReport(): SafetyReport {
     alarmChannels: alarms,
     warningChannels: warns,
     channelUtilization: util,
+  };
+}
+
+function generateMockRemainingLife(stressHistory: number[], monitoringYears: number): RemainingLifeResult {
+  const maxStress = stressHistory.length > 0 ? Math.max(...stressHistory.map(Math.abs)) : 0;
+  const avgStress = stressHistory.length > 0
+    ? stressHistory.reduce((s, v) => s + Math.abs(v), 0) / stressHistory.length
+    : 0;
+
+  const C = 1e12;
+  const m = 5.0;
+  const fatigueLimit = 2.0e6;
+
+  const cycles: { range: number; mean: number; count: number }[] = [];
+  let totalCycles = 0;
+  let cumulativeDamage = 0;
+
+  if (stressHistory.length >= 2) {
+    const numBins = 8;
+    const rangeMax = maxStress;
+    const binWidth = rangeMax / numBins;
+
+    for (let b = 0; b < numBins; b++) {
+      const rangeLo = b * binWidth;
+      const rangeHi = (b + 1) * binWidth;
+      const rangeMid = (rangeLo + rangeHi) / 2;
+
+      if (rangeMid <= fatigueLimit) continue;
+
+      const cycleCount = Math.max(1, Math.floor(Math.random() * 20 + 5));
+      cycles.push({ range: rangeMid, mean: avgStress * (0.5 + Math.random() * 0.5), count: cycleCount });
+      totalCycles += cycleCount;
+
+      const Nf = C / Math.pow(rangeMid, m);
+      cumulativeDamage += cycleCount / Nf;
+    }
+  }
+
+  const damageRatePerYear = monitoringYears > 0 ? cumulativeDamage / monitoringYears : 0;
+  const remainingLifeYears = damageRatePerYear > 1e-15
+    ? Math.max(0, (1.0 - cumulativeDamage) / damageRatePerYear)
+    : 999;
+
+  let maintenanceLevel: 1 | 2 | 3;
+  let maintenanceAdvice: string;
+
+  if (cumulativeDamage < 0.3) {
+    maintenanceLevel = 1;
+    maintenanceAdvice = '构件疲劳损伤较小（D<0.3），建议继续常规监测，下次全面检测可安排在3年后。保持当前监测频率，重点关注应力集中区域。';
+  } else if (cumulativeDamage < 0.7) {
+    maintenanceLevel = 2;
+    maintenanceAdvice = '构件已积累显著疲劳损伤（0.3≤D<0.7），建议加强维护：1) 增加监测频率至2倍；2) 1年内安排全面检测；3) 对高应力区域进行无损检测；4) 考虑局部加固方案。';
+  } else {
+    maintenanceLevel = 3;
+    maintenanceAdvice = '构件疲劳损伤严重（D≥0.7），存在疲劳失效风险！建议立即：1) 增加监测频率至最高；2) 限制结构荷载；3) 尽快安排专业评估和加固；4) 制定应急预案。';
+  }
+
+  return {
+    cumulativeDamage,
+    damageRatePerYear,
+    remainingLifeYears,
+    maintenanceLevel,
+    maintenanceAdvice,
+    cycles,
+    totalCycles,
+    maxCycleRange: maxStress,
+    equivalentStressRange: avgStress * 1.5,
+    computeTimeMs: 1 + Math.random() * 3,
   };
 }
 

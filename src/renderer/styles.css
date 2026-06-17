@@ -885,3 +885,251 @@ html, body, #root {
   border-radius: 50%;
   animation: blink 1s ease-in-out infinite;
 }
+
+.remaining-life-panel {
+  margin-top: 4px;
+}
+
+.rl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.rl-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.rl-predict-btn {
+  padding: 4px 14px;
+  border: 1px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rl-predict-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: #60a5fa;
+}
+
+.rl-predict-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rl-predict-btn.computing {
+  animation: pulse-blue 1s ease-in-out infinite;
+  border-color: #818cf8;
+}
+
+@keyframes pulse-blue {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.rl-empty {
+  text-align: center;
+  padding: 16px 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.rl-empty-icon {
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.rl-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rl-life-display {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 0;
+  background: #0f172a;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+}
+
+.rl-life-value {
+  font-size: 36px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.rl-life-unit {
+  font-size: 14px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.rl-damage-section {
+  padding: 0 2px;
+}
+
+.rl-damage-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.rl-damage-value {
+  color: #e2e8f0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rl-damage-bar {
+  height: 14px;
+  background: #1e293b;
+  border-radius: 7px;
+  overflow: hidden;
+  position: relative;
+}
+
+.rl-damage-bar-fill {
+  height: 100%;
+  border-radius: 7px;
+  transition: width 0.6s ease;
+  position: relative;
+  z-index: 1;
+}
+
+.rl-damage-markers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.rl-damage-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.rl-damage-marker span {
+  position: absolute;
+  top: -14px;
+  left: -8px;
+  font-size: 9px;
+  color: #64748b;
+}
+
+.rl-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.rl-stat {
+  padding: 6px 8px;
+  background: #0f172a;
+  border-radius: 5px;
+  border: 1px solid #1e293b;
+}
+
+.rl-stat-label {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.rl-stat-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rl-maintenance {
+  padding: 10px 12px;
+  background: #0f172a;
+  border-radius: 6px;
+  border: 1px solid #1e293b;
+  border-left: 3px solid;
+}
+
+.rl-maintenance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.rl-maintenance-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.rl-maintenance-text {
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.6;
+}
+
+.rl-cycles-section {
+  margin-top: 2px;
+}
+
+.rl-cycles-title {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.rl-cycles-table {
+  font-size: 11px;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.rl-cycles-header {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 1.5fr;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #1e293b;
+  color: #64748b;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.rl-cycles-row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 1.5fr;
+  gap: 4px;
+  padding: 4px 8px;
+  color: #cbd5e1;
+  border-top: 1px solid #1e293b;
+  font-variant-numeric: tabular-nums;
+}

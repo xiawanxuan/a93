@@ -114,6 +114,31 @@ export interface StressSnapshot {
   elemVonMises: number[];
 }
 
+export interface StressCycle {
+  range: number;
+  mean: number;
+  count: number;
+}
+
+export interface FatigueParams {
+  C: number;
+  m: number;
+  fatigueLimit: number;
+}
+
+export interface RemainingLifeResult {
+  cumulativeDamage: number;
+  damageRatePerYear: number;
+  remainingLifeYears: number;
+  maintenanceLevel: 1 | 2 | 3;
+  maintenanceAdvice: string;
+  cycles: StressCycle[];
+  totalCycles: number;
+  maxCycleRange: number;
+  equivalentStressRange: number;
+  computeTimeMs: number;
+}
+
 export interface PlaybackConfig {
   startTime: number;
   endTime: number;
@@ -138,6 +163,7 @@ export const IPC_CHANNELS = {
   FE_CREATE_SECTION: 'fe:create-section',
   FE_ADD_HOLE: 'fe:add-hole',
   FE_SOLVE_INVERSE: 'fe:solve-inverse',
+  FE_PREDICT_REMAINING_LIFE: 'fe:predict-remaining-life',
   SAFETY_EVALUATE: 'safety:evaluate',
   SERIAL_START: 'serial:start',
   SERIAL_STOP: 'serial:stop',

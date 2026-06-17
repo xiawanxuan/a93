@@ -9,6 +9,8 @@ import type {
   GaugeConfig,
   StressSnapshot,
   AppConfig,
+  RemainingLifeResult,
+  FatigueParams,
 } from '../shared/types';
 
 const electronAPI = {
@@ -31,6 +33,13 @@ const electronAPI = {
 
   feSolveInverse: (strains: Record<string, number>): Promise<FEResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.FE_SOLVE_INVERSE, strains),
+
+  fePredictRemainingLife: (
+    stressHistory: number[],
+    monitoringDurationYears: number,
+    params?: FatigueParams
+  ): Promise<RemainingLifeResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FE_PREDICT_REMAINING_LIFE, stressHistory, monitoringDurationYears, params),
 
   safetyEvaluate: (
     elemVonMises: number[],

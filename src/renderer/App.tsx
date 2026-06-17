@@ -4,6 +4,7 @@ import { SafetyIndicator } from './components/SafetyIndicator';
 import { StrainDataPanel } from './components/StrainDataPanel';
 import { PlaybackController } from './components/PlaybackController';
 import { SectionSelector } from './components/SectionSelector';
+import { RemainingLifePanel } from './components/RemainingLifePanel';
 import type {
   CrossSection,
   FEResult,
@@ -14,6 +15,7 @@ import type {
   StressSnapshot,
   AppConfig,
   StrainGauge,
+  RemainingLifeResult,
 } from '../shared/types';
 import { SafetyStatusCode } from '../shared/types';
 import { formatStress, formatTimestamp } from './utils/color';
@@ -36,6 +38,7 @@ const App: React.FC = () => {
   const [showGaugeMarkers, setShowGaugeMarkers] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
   const [showContour, setShowContour] = useState(false);
+  const [remainingLife, setRemainingLife] = useState<RemainingLifeResult | null>(null);
 
   const cleanupRef = useRef<(() => void) | null>(null);
   const sectionGauges = useMemo<StrainGauge[]>(() => {
@@ -328,6 +331,18 @@ const App: React.FC = () => {
     [selectedSectionId]
   );
 
+  const handlePredictRemainingLife = useCallback(
+    async (stressHistory: number[], monitoringYears: number) => {
+      try {
+        const result = await window.api.fePredictRemainingLife(stressHistory, monitoringYears);
+        setRemainingLife(result);
+      } catch (err) {
+        console.error('Failed to predict remaining life:', err);
+      }
+    },
+    []
+  );
+
   const activeSnapshots = isLiveMode ? liveSnapshots : historySnapshots;
 
   return (
@@ -451,6 +466,14 @@ const App: React.FC = () => {
               frame={currentFrame}
               safetyReport={safetyReport}
               gaugeChannels={sectionGauges.map((g) => g.channel)}
+            />
+
+            <div className="form-divider" />
+
+            <RemainingLifePanel
+              snapshots={activeSnapshots}
+              remainingLife={remainingLife}
+              onPredict={handlePredictRemainingLife}
             />
           </div>
         </div>

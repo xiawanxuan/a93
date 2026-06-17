@@ -198,6 +198,74 @@ Napi::Value FEAddHole(const CallbackInfo& info) {
     return result;
 }
 
+Napi::Value FEPredictRemainingLife(const CallbackInfo& info) {
+    Env env = info.Env();
+    std::lock_guard<std::mutex> lock(g_mutex);
+    ensureInitialized();
+
+    if (!info[0].IsArray()) {
+        Error::New(env, "stressHistory must be an array of numbers").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    Array stressArr = info[0].As<Array>();
+    std::vector<double> stressHistory;
+    stressHistory.reserve(stressArr.Length());
+
+    for (uint32_t i = 0; i < stressArr.Length(); i++) {
+        if (stressArr[i].IsNumber()) {
+            stressHistory.push_back(stressArr[i].As<Number>().DoubleValue());
+        }
+    }
+
+    double monitoringYears = info[1].IsNumber() ? info[1].As<Number>().DoubleValue() : 1.0;
+
+    FatigueParams params;
+    params.C = 1e12;
+    params.m = 5.0;
+    params.fatigueLimit = 2.0e6;
+
+    if (info[2].IsObject()) {
+        Object paramsObj = info[2].As<Object>();
+        if (paramsObj.Has("C") && paramsObj.Get("C").IsNumber()) {
+            params.C = paramsObj.Get("C").As<Number>().DoubleValue();
+        }
+        if (paramsObj.Has("m") && paramsObj.Get("m").IsNumber()) {
+            params.m = paramsObj.Get("m").As<Number>().DoubleValue();
+        }
+        if (paramsObj.Has("fatigueLimit") && paramsObj.Get("fatigueLimit").IsNumber()) {
+            params.fatigueLimit = paramsObj.Get("fatigueLimit").As<Number>().DoubleValue();
+        }
+    }
+
+    RemainingLifeResult lifeResult = g_solver->predictRemainingLife(
+        stressHistory, monitoringYears, params);
+
+    Object result = Object::New(env);
+    result.Set("cumulativeDamage", Number::New(env, lifeResult.cumulativeDamage));
+    result.Set("damageRatePerYear", Number::New(env, lifeResult.damageRatePerYear));
+    result.Set("remainingLifeYears", Number::New(env, lifeResult.remainingLifeYears));
+    result.Set("maintenanceLevel", Number::New(env, lifeResult.maintenanceLevel));
+    result.Set("maintenanceAdvice", String::New(env, lifeResult.maintenanceAdvice));
+    result.Set("totalCycles", Number::New(env, lifeResult.totalCycles));
+    result.Set("maxCycleRange", Number::New(env, lifeResult.maxCycleRange));
+    result.Set("equivalentStressRange", Number::New(env, lifeResult.equivalentStressRange));
+    result.Set("computeTimeMs", Number::New(env, lifeResult.computeTimeMs));
+
+    Array cyclesArr = Array::New(env);
+    for (size_t i = 0; i < lifeResult.cycles.size(); i++) {
+        const auto& c = lifeResult.cycles[i];
+        Object cycleObj = Object::New(env);
+        cycleObj.Set("range", Number::New(env, c.range));
+        cycleObj.Set("mean", Number::New(env, c.mean));
+        cycleObj.Set("count", Number::New(env, c.count));
+        cyclesArr[i] = cycleObj;
+    }
+    result.Set("cycles", cyclesArr);
+
+    return result;
+}
+
 Napi::Value FESolveInverse(const CallbackInfo& info) {
     Env env = info.Env();
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -626,6 +694,7 @@ Napi::Value DBGetAllGauges(const CallbackInfo& info) {
 Object Init(Env env, Object exports, Object module) {
     exports.Set("feCreateSection", Function::New(env, FESolverCreateSection));
     exports.Set("feAddHole", Function::New(env, FEAddHole));
+    exports.Set("fePredictRemainingLife", Function::New(env, FEPredictRemainingLife));
     exports.Set("feSolveInverse", Function::New(env, FESolveInverse));
     exports.Set("safetyEvaluate", Function::New(env, SafetyEvaluate));
     exports.Set("serialStart", Function::New(env, SerialStart));

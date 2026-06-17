@@ -8,6 +8,8 @@ import {
   StressSnapshot,
   AppConfig,
   SafetyStatusCode,
+  RemainingLifeResult,
+  FatigueParams,
 } from '../shared/types';
 
 const MOCK_SECTIONS: SectionInfo[] = [
@@ -483,6 +485,100 @@ export const mockApi = {
         const feResult = generateMockFEResult(elementCount);
         resolve(feResult);
       }, 20);
+    });
+  },
+
+  fePredictRemainingLife: (
+    stressHistory: number[],
+    monitoringDurationYears: number,
+    params?: FatigueParams
+  ): Promise<RemainingLifeResult> => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const C = params?.C ?? 1e12;
+        const m = params?.m ?? 5.0;
+        const fatigueLimit = params?.fatigueLimit ?? 2.0e6;
+
+        const maxStress = stressHistory.length > 0 ? Math.max(...stressHistory.map(Math.abs)) : 0;
+        const avgStress = stressHistory.length > 0
+          ? stressHistory.reduce((s, v) => s + Math.abs(v), 0) / stressHistory.length
+          : 0;
+
+        const cycles: { range: number; mean: number; count: number }[] = [];
+        let totalCycles = 0;
+        let cumulativeDamage = 0;
+
+        if (stressHistory.length >= 2) {
+          const peaks: number[] = [stressHistory[0]];
+          for (let i = 1; i < stressHistory.length - 1; i++) {
+            const prev = stressHistory[i - 1];
+            const curr = stressHistory[i];
+            const next = stressHistory[i + 1];
+            if ((curr > prev && curr > next) || (curr < prev && curr < next)) {
+              peaks.push(curr);
+            }
+          }
+          peaks.push(stressHistory[stressHistory.length - 1]);
+
+          const rangeCounts = new Map<number, { range: number; mean: number; count: number }>();
+          for (let i = 0; i < peaks.length - 1; i++) {
+            const range = Math.abs(peaks[i + 1] - peaks[i]);
+            const mean = (peaks[i] + peaks[i + 1]) / 2;
+            if (range < 1e-10) continue;
+
+            const bin = Math.round(range * 1e-3);
+            const existing = rangeCounts.get(bin);
+            if (existing) {
+              existing.count++;
+            } else {
+              rangeCounts.set(bin, { range, mean, count: 1 });
+            }
+          }
+
+          for (const cycle of rangeCounts.values()) {
+            if (cycle.range > fatigueLimit) {
+              cycles.push(cycle);
+              totalCycles += cycle.count;
+              const Nf = C / Math.pow(cycle.range, m);
+              cumulativeDamage += cycle.count / Nf;
+            }
+          }
+
+          cycles.sort((a, b) => b.range - a.range);
+        }
+
+        const damageRatePerYear = monitoringDurationYears > 0 ? cumulativeDamage / monitoringDurationYears : 0;
+        const remainingLifeYears = damageRatePerYear > 1e-15
+          ? Math.max(0, (1.0 - cumulativeDamage) / damageRatePerYear)
+          : 999;
+
+        let maintenanceLevel: 1 | 2 | 3;
+        let maintenanceAdvice: string;
+
+        if (cumulativeDamage < 0.3) {
+          maintenanceLevel = 1;
+          maintenanceAdvice = '构件疲劳损伤较小（D<0.3），建议继续常规监测，下次全面检测可安排在3年后。保持当前监测频率，重点关注应力集中区域。';
+        } else if (cumulativeDamage < 0.7) {
+          maintenanceLevel = 2;
+          maintenanceAdvice = '构件已积累显著疲劳损伤（0.3≤D<0.7），建议加强维护：1) 增加监测频率至2倍；2) 1年内安排全面检测；3) 对高应力区域进行无损检测；4) 考虑局部加固方案。';
+        } else {
+          maintenanceLevel = 3;
+          maintenanceAdvice = '构件疲劳损伤严重（D≥0.7），存在疲劳失效风险！建议立即：1) 增加监测频率至最高；2) 限制结构荷载；3) 尽快安排专业评估和加固；4) 制定应急预案。';
+        }
+
+        resolve({
+          cumulativeDamage,
+          damageRatePerYear,
+          remainingLifeYears,
+          maintenanceLevel,
+          maintenanceAdvice,
+          cycles,
+          totalCycles,
+          maxCycleRange: maxStress,
+          equivalentStressRange: avgStress * 1.5,
+          computeTimeMs: 1 + Math.random() * 3,
+        });
+      }, 30);
     });
   },
 

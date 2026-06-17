@@ -703,4 +703,238 @@ Eigen::MatrixXd FESolver::buildMLSStrainDisplacementMatrix(
     return B;
 }
 
+std::vector<double> FESolver::extractPeaksAndValleys(const std::vector<double>& stressHistory) const {
+    std::vector<double> peaks;
+    if (stressHistory.size() < 3) {
+        return stressHistory;
+    }
+
+    peaks.push_back(stressHistory[0]);
+
+    for (size_t i = 1; i < stressHistory.size() - 1; i++) {
+        double prev = stressHistory[i - 1];
+        double curr = stressHistory[i];
+        double next = stressHistory[i + 1];
+
+        if ((curr > prev && curr > next) || (curr < prev && curr < next)) {
+            peaks.push_back(curr);
+        } else if (curr == prev && curr != next) {
+            if ((curr > next && i >= 2 && stressHistory[i - 2] < curr) ||
+                (curr < next && i >= 2 && stressHistory[i - 2] > curr)) {
+                peaks.push_back(curr);
+            }
+        }
+    }
+
+    peaks.push_back(stressHistory.back());
+
+    std::vector<double> filtered;
+    filtered.push_back(peaks[0]);
+    for (size_t i = 1; i < peaks.size(); i++) {
+        if (peaks[i] != filtered.back()) {
+            filtered.push_back(peaks[i]);
+        }
+    }
+
+    return filtered;
+}
+
+std::vector<StressCycle> FESolver::rainflowCount(const std::vector<double>& stressHistory) const {
+    std::vector<StressCycle> cycles;
+
+    std::vector<double> points = extractPeaksAndValleys(stressHistory);
+
+    if (points.size() < 3) {
+        if (points.size() == 2) {
+            double range = std::abs(points[1] - points[0]);
+            double mean = (points[0] + points[1]) / 2.0;
+            if (range > 1e-10) {
+                cycles.push_back({range, mean, 1});
+            }
+        }
+        return cycles;
+    }
+
+    std::vector<double> residual(points.begin(), points.end());
+
+    std::map<std::pair<int, int>, StressCycle> cycleMap;
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+
+        for (size_t i = 1; i + 2 < residual.size(); i++) {
+            double y1 = std::abs(residual[i] - residual[i - 1]);
+            double y2 = std::abs(residual[i + 1] - residual[i]);
+            double y3 = std::abs(residual[i + 2] - residual[i + 1]);
+
+            if (y2 <= y1 && y2 <= y3) {
+                double range = y2;
+                double mean = (residual[i] + residual[i + 1]) / 2.0;
+
+                int rangeBin = static_cast<int>(range * 1000);
+                int meanBin = static_cast<int>(mean * 1000);
+                auto key = std::make_pair(rangeBin, meanBin);
+
+                auto it = cycleMap.find(key);
+                if (it != cycleMap.end()) {
+                    it->second.count++;
+                } else {
+                    cycleMap[key] = {range, mean, 1};
+                }
+
+                residual.erase(residual.begin() + i, residual.begin() + i + 2);
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    for (size_t i = 0; i + 1 < residual.size(); i++) {
+        double range = std::abs(residual[i + 1] - residual[i]);
+        double mean = (residual[i] + residual[i + 1]) / 2.0;
+
+        if (range > 1e-10) {
+            int rangeBin = static_cast<int>(range * 1000);
+            int meanBin = static_cast<int>(mean * 1000);
+            auto key = std::make_pair(rangeBin, meanBin);
+
+            auto it = cycleMap.find(key);
+            if (it != cycleMap.end()) {
+                it->second.count += 0.5;
+            } else {
+                cycleMap[key] = {range, mean, 1};
+            }
+        }
+    }
+
+    for (auto& [key, cycle] : cycleMap) {
+        cycles.push_back(cycle);
+    }
+
+    std::sort(cycles.begin(), cycles.end(),
+              [](const StressCycle& a, const StressCycle& b) {
+                  return a.range > b.range;
+              });
+
+    return cycles;
+}
+
+double FESolver::computeMinerDamage(const std::vector<StressCycle>& cycles,
+                                     const FatigueParams& params) const {
+    double totalDamage = 0.0;
+
+    for (const auto& cycle : cycles) {
+        if (cycle.range <= params.fatigueLimit) {
+            continue;
+        }
+
+        double Nf = params.C / std::pow(cycle.range, params.m);
+        double damage = static_cast<double>(cycle.count) / Nf;
+        totalDamage += damage;
+    }
+
+    return totalDamage;
+}
+
+double FESolver::computeEquivalentStressRange(const std::vector<StressCycle>& cycles,
+                                               const FatigueParams& params) const {
+    double sumNDamage = 0.0;
+    double totalCycles = 0.0;
+
+    for (const auto& cycle : cycles) {
+        if (cycle.range <= params.fatigueLimit) continue;
+        double Nf = params.C / std::pow(cycle.range, params.m);
+        double damage = static_cast<double>(cycle.count) / Nf;
+        sumNDamage += damage * std::pow(cycle.range, params.m);
+        totalCycles += static_cast<double>(cycle.count);
+    }
+
+    if (totalCycles < 1.0) return 0.0;
+
+    double totalDamage = computeMinerDamage(cycles, params);
+    if (totalDamage < 1e-15) return 0.0;
+
+    double seq = std::pow(sumNDamage / totalDamage, 1.0 / params.m);
+    return seq;
+}
+
+RemainingLifeResult FESolver::predictRemainingLife(
+    const std::vector<double>& stressHistory,
+    double monitoringDurationYears,
+    const FatigueParams& params) const {
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    RemainingLifeResult result;
+    result.cumulativeDamage = 0.0;
+    result.damageRatePerYear = 0.0;
+    result.remainingLifeYears = 0.0;
+    result.maintenanceLevel = 1;
+    result.totalCycles = 0;
+    result.maxCycleRange = 0.0;
+    result.equivalentStressRange = 0.0;
+
+    if (stressHistory.empty() || monitoringDurationYears <= 0) {
+        result.maintenanceAdvice = "数据不足，无法预测剩余寿命";
+        auto endTime = std::chrono::high_resolution_clock::now();
+        result.computeTimeMs = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+        return result;
+    }
+
+    result.cycles = rainflowCount(stressHistory);
+
+    result.totalCycles = 0;
+    for (const auto& c : result.cycles) {
+        result.totalCycles += c.count;
+    }
+
+    result.maxCycleRange = 0.0;
+    for (const auto& c : result.cycles) {
+        result.maxCycleRange = std::max(result.maxCycleRange, c.range);
+    }
+
+    result.cumulativeDamage = computeMinerDamage(result.cycles, params);
+
+    result.equivalentStressRange = computeEquivalentStressRange(result.cycles, params);
+
+    result.damageRatePerYear = result.cumulativeDamage / monitoringDurationYears;
+
+    if (result.damageRatePerYear > 1e-15) {
+        double remainingDamage = 1.0 - result.cumulativeDamage;
+        if (remainingDamage > 0) {
+            result.remainingLifeYears = remainingDamage / result.damageRatePerYear;
+        } else {
+            result.remainingLifeYears = 0.0;
+        }
+    } else {
+        result.remainingLifeYears = 999.0;
+    }
+
+    if (result.cumulativeDamage < 0.3) {
+        result.maintenanceLevel = 1;
+        result.maintenanceAdvice =
+            "构件疲劳损伤较小（D<0.3），建议继续常规监测，"
+            "下次全面检测可安排在3年后。保持当前监测频率，"
+            "重点关注应力集中区域。";
+    } else if (result.cumulativeDamage < 0.7) {
+        result.maintenanceLevel = 2;
+        result.maintenanceAdvice =
+            "构件已积累显著疲劳损伤（0.3≤D<0.7），建议加强维护："
+            "1) 增加监测频率至2倍；2) 1年内安排全面检测；"
+            "3) 对高应力区域进行无损检测；4) 考虑局部加固方案。";
+    } else {
+        result.maintenanceLevel = 3;
+        result.maintenanceAdvice =
+            "构件疲劳损伤严重（D≥0.7），存在疲劳失效风险！"
+            "建议立即：1) 增加监测频率至最高；2) 限制结构荷载；"
+            "3) 尽快安排专业评估和加固；4) 制定应急预案。";
+    }
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    result.computeTimeMs = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+
+    return result;
+}
+
 }

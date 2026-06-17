@@ -35,6 +35,31 @@ struct StrainGauge {
     double angle;
 };
 
+struct StressCycle {
+    double range;
+    double mean;
+    int count;
+};
+
+struct FatigueParams {
+    double C;
+    double m;
+    double fatigueLimit;
+};
+
+struct RemainingLifeResult {
+    double cumulativeDamage;
+    double damageRatePerYear;
+    double remainingLifeYears;
+    int maintenanceLevel;
+    std::string maintenanceAdvice;
+    std::vector<StressCycle> cycles;
+    int totalCycles;
+    double maxCycleRange;
+    double equivalentStressRange;
+    double computeTimeMs;
+};
+
 struct FEResult {
     Eigen::VectorXd nodeStressXX;
     Eigen::VectorXd nodeStressYY;
@@ -77,6 +102,13 @@ public:
     void addHole(CrossSection& section, const std::vector<Node2D>& polygon, double margin = 0.02);
 
     void markHoleBoundaryElements(CrossSection& section) const;
+
+    RemainingLifeResult predictRemainingLife(
+        const std::vector<double>& stressHistory,
+        double monitoringDurationYears,
+        const FatigueParams& params = FatigueParams{1e12, 5.0, 2.0e6}) const;
+
+    std::vector<StressCycle> rainflowCount(const std::vector<double>& stressHistory) const;
 
     std::vector<double> getElementCenters(const CrossSection& section) const;
 
@@ -147,6 +179,16 @@ private:
     bool isPointInPolygon(
         double x, double y,
         const std::vector<Node2D>& polygon) const;
+
+    std::vector<double> extractPeaksAndValleys(const std::vector<double>& stressHistory) const;
+
+    double computeMinerDamage(
+        const std::vector<StressCycle>& cycles,
+        const FatigueParams& params) const;
+
+    double computeEquivalentStressRange(
+        const std::vector<StressCycle>& cycles,
+        const FatigueParams& params) const;
 };
 
 }
