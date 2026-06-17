@@ -4,9 +4,15 @@ export interface Node2D {
   y: number;
 }
 
+export interface Hole {
+  polygon: Node2D[];
+  margin: number;
+}
+
 export interface QuadElement {
   id: number;
   nodeIds: [number, number, number, number];
+  isHoleBoundary?: boolean;
 }
 
 export interface StrainGauge {
@@ -26,6 +32,7 @@ export interface CrossSection {
   nodes: Node2D[];
   elements: QuadElement[];
   gauges: StrainGauge[];
+  holes?: Hole[];
 }
 
 export interface FEResult {
@@ -129,6 +136,7 @@ export interface AppConfig {
 
 export const IPC_CHANNELS = {
   FE_CREATE_SECTION: 'fe:create-section',
+  FE_ADD_HOLE: 'fe:add-hole',
   FE_SOLVE_INVERSE: 'fe:solve-inverse',
   SAFETY_EVALUATE: 'safety:evaluate',
   SERIAL_START: 'serial:start',

@@ -15,11 +15,17 @@ struct Node2D {
     int id;
 };
 
+struct Hole {
+    std::vector<Node2D> polygon;
+    double margin;
+};
+
 struct QuadElement {
     std::array<int, 4> nodeIds;
     int id;
     double E;
     double nu;
+    bool isHoleBoundary;
 };
 
 struct StrainGauge {
@@ -48,6 +54,7 @@ struct CrossSection {
     std::vector<Node2D> nodes;
     std::vector<QuadElement> elements;
     std::vector<StrainGauge> gauges;
+    std::vector<Hole> holes;
 };
 
 class FESolver {
@@ -66,6 +73,10 @@ public:
 
     void addGauge(CrossSection& section, int id, int channel,
                   double x, double y, double angle_deg);
+
+    void addHole(CrossSection& section, const std::vector<Node2D>& polygon, double margin = 0.02);
+
+    void markHoleBoundaryElements(CrossSection& section) const;
 
     std::vector<double> getElementCenters(const CrossSection& section) const;
 
@@ -99,6 +110,43 @@ private:
         const Eigen::VectorXd& displacements) const;
 
     double computeVonMises(double sxx, double syy, double sxy) const;
+
+    double gaussianWeight(double r, double dm) const;
+
+    Eigen::MatrixXd buildMLSBasisMatrix(double x, double y) const;
+
+    Eigen::MatrixXd buildMLSWeightMatrix(
+        const std::vector<Node2D>& nodes,
+        const std::vector<int>& supportNodeIds,
+        double x, double y, double dm) const;
+
+    Eigen::MatrixXd buildMLSShapeFunction(
+        const std::vector<Node2D>& nodes,
+        const std::vector<int>& supportNodeIds,
+        double x, double y, double dm) const;
+
+    Eigen::MatrixXd buildMLSStrainDisplacementMatrix(
+        const CrossSection& section,
+        const std::vector<int>& supportNodeIds,
+        double x, double y, double dm,
+        double gaugeAngle) const;
+
+    std::vector<int> findSupportNodes(
+        const std::vector<Node2D>& nodes,
+        double x, double y, double dm) const;
+
+    bool isElementNearHole(
+        const QuadElement& elem,
+        const std::vector<Node2D>& nodes,
+        const Hole& hole) const;
+
+    double pointToPolygonDistance(
+        double x, double y,
+        const std::vector<Node2D>& polygon) const;
+
+    bool isPointInPolygon(
+        double x, double y,
+        const std::vector<Node2D>& polygon) const;
 };
 
 }

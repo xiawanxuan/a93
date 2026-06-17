@@ -147,6 +147,57 @@ Napi::Value InitFESolverCreateSection(const CallbackInfo& info) {
     return result;
 }
 
+Napi::Value FEAddHole(const CallbackInfo& info) {
+    Env env = info.Env();
+    std::lock_guard<std::mutex> lock(g_mutex);
+    ensureInitialized();
+
+    if (!g_section) {
+        Error::New(env, "Section not initialized").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    if (!info[0].IsArray()) {
+        Error::New(env, "Polygon must be an array").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    Array polygonArr = info[0].As<Array>();
+    std::vector<Node2D> polygon;
+    polygon.reserve(polygonArr.Length());
+
+    for (uint32_t i = 0; i < polygonArr.Length(); i++) {
+        if (polygonArr[i].IsObject()) {
+            Object pt = polygonArr[i].As<Object>();
+            Node2D node;
+            node.id = i;
+            node.x = pt.Has("x") ? pt.Get("x").As<Number>().DoubleValue() : 0;
+            node.y = pt.Has("y") ? pt.Get("y").As<Number>().DoubleValue() : 0;
+            polygon.push_back(node);
+        }
+    }
+
+    double margin = info[1].IsNumber() ? info[1].As<Number>().DoubleValue() : 0.02;
+    g_solver->addHole(*g_section, polygon, margin);
+
+    Object result = Object::New(env);
+    result.Set("success", Boolean::New(env, true));
+    result.Set("holeCount", Number::New(env, g_section->holes.size()));
+    result.Set("margin", Number::New(env, margin));
+
+    Array holeBoundaryElems = Array::New(env);
+    int count = 0;
+    for (size_t i = 0; i < g_section->elements.size(); i++) {
+        if (g_section->elements[i].isHoleBoundary) {
+            holeBoundaryElems[count++] = Number::New(env, (int)i);
+        }
+    }
+    result.Set("holeBoundaryElements", holeBoundaryElems);
+    result.Set("holeBoundaryCount", Number::New(env, count));
+
+    return result;
+}
+
 Napi::Value FESolveInverse(const CallbackInfo& info) {
     Env env = info.Env();
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -574,6 +625,7 @@ Napi::Value DBGetAllGauges(const CallbackInfo& info) {
 
 Object Init(Env env, Object exports, Object module) {
     exports.Set("feCreateSection", Function::New(env, FESolverCreateSection));
+    exports.Set("feAddHole", Function::New(env, FEAddHole));
     exports.Set("feSolveInverse", Function::New(env, FESolveInverse));
     exports.Set("safetyEvaluate", Function::New(env, SafetyEvaluate));
     exports.Set("serialStart", Function::New(env, SerialStart));

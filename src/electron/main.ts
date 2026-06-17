@@ -250,6 +250,25 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.FE_ADD_HOLE,
+    (_event: IpcMainInvokeEvent, polygon: Array<{ x: number; y: number }>, margin?: number) => {
+      if (nativeAddon) {
+        return nativeAddon.feAddHole(polygon, margin);
+      }
+      const boundaryElems: number[] = [];
+      for (let i = 0; i < 50; i++) {
+        boundaryElems.push(Math.floor(Math.random() * 5000));
+      }
+      return {
+        success: true,
+        holeCount: 1,
+        holeBoundaryElements: boundaryElems,
+        holeBoundaryCount: boundaryElems.length,
+      };
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.FE_SOLVE_INVERSE,
     (_event: IpcMainInvokeEvent, strains: Record<string, number>) => {
       if (nativeAddon) {

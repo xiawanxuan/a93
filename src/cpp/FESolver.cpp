@@ -45,6 +45,7 @@ CrossSection FESolver::createRectangularSection(
             elem.nodeIds[3] = (j + 1) * (divX + 1) + i;
             elem.E = E;
             elem.nu = nu;
+            elem.isHoleBoundary = false;
             section.elements.push_back(elem);
         }
     }
@@ -207,31 +208,74 @@ Eigen::MatrixXd FESolver::buildGaugeInterpolationMatrix(
     Eigen::MatrixXd G(nGauges, nNodes * 2);
     G.setZero();
 
+    double avgElemSize = std::sqrt(section.width * section.height / section.elements.size());
+    double dm = avgElemSize * 2.5;
+
     for (int g = 0; g < nGauges; g++) {
         const StrainGauge& gauge = section.gauges[g];
+        bool found = false;
+
         for (const QuadElement& elem : section.elements) {
             const Node2D& n0 = section.nodes[elem.nodeIds[0]];
             const Node2D& n2 = section.nodes[elem.nodeIds[2]];
             if (gauge.x >= n0.x - 1e-9 && gauge.x <= n2.x + 1e-9 &&
                 gauge.y >= n0.y - 1e-9 && gauge.y <= n2.y + 1e-9) {
-                double dx = n2.x - n0.x;
-                double dy = n2.y - n0.y;
-                double xi = dx > 1e-9 ? 2.0 * (gauge.x - n0.x) / dx - 1.0 : 0.0;
-                double eta = dy > 1e-9 ? 2.0 * (gauge.y - n0.y) / dy - 1.0 : 0.0;
 
-                Eigen::MatrixXd B = buildStrainDisplacementMatrix(elem, section.nodes, xi, eta);
-                double c = std::cos(gauge.angle);
-                double s = std::sin(gauge.angle);
-                Eigen::RowVector3d strainTransform;
-                strainTransform << c * c, s * s, 2.0 * c * s;
-                Eigen::RowVectorXd transformed = strainTransform * B;
+                if (elem.isHoleBoundary) {
+                    std::vector<int> supportIds = findSupportNodes(section.nodes, gauge.x, gauge.y, dm);
+                    Eigen::MatrixXd B_mls = buildMLSStrainDisplacementMatrix(
+                        section, supportIds, gauge.x, gauge.y, dm, gauge.angle);
 
-                for (int a = 0; a < 4; a++) {
-                    int nodeId = elem.nodeIds[a];
-                    G(g, nodeId * 2)     = transformed(a * 2);
-                    G(g, nodeId * 2 + 1) = transformed(a * 2 + 1);
+                    Eigen::RowVector3d strainTransform;
+                    double c = std::cos(gauge.angle);
+                    double s = std::sin(gauge.angle);
+                    strainTransform << c * c, s * s, 2.0 * c * s;
+                    Eigen::RowVectorXd transformed = strainTransform * B_mls;
+
+                    for (size_t i = 0; i < supportIds.size(); i++) {
+                        int nodeId = supportIds[i];
+                        G(g, nodeId * 2)     = transformed(i * 2);
+                        G(g, nodeId * 2 + 1) = transformed(i * 2 + 1);
+                    }
+                } else {
+                    double dx = n2.x - n0.x;
+                    double dy = n2.y - n0.y;
+                    double xi = dx > 1e-9 ? 2.0 * (gauge.x - n0.x) / dx - 1.0 : 0.0;
+                    double eta = dy > 1e-9 ? 2.0 * (gauge.y - n0.y) / dy - 1.0 : 0.0;
+
+                    Eigen::MatrixXd B = buildStrainDisplacementMatrix(elem, section.nodes, xi, eta);
+                    double c = std::cos(gauge.angle);
+                    double s = std::sin(gauge.angle);
+                    Eigen::RowVector3d strainTransform;
+                    strainTransform << c * c, s * s, 2.0 * c * s;
+                    Eigen::RowVectorXd transformed = strainTransform * B;
+
+                    for (int a = 0; a < 4; a++) {
+                        int nodeId = elem.nodeIds[a];
+                        G(g, nodeId * 2)     = transformed(a * 2);
+                        G(g, nodeId * 2 + 1) = transformed(a * 2 + 1);
+                    }
                 }
+                found = true;
                 break;
+            }
+        }
+
+        if (!found) {
+            std::vector<int> supportIds = findSupportNodes(section.nodes, gauge.x, gauge.y, dm);
+            Eigen::MatrixXd B_mls = buildMLSStrainDisplacementMatrix(
+                section, supportIds, gauge.x, gauge.y, dm, gauge.angle);
+
+            Eigen::RowVector3d strainTransform;
+            double c = std::cos(gauge.angle);
+            double s = std::sin(gauge.angle);
+            strainTransform << c * c, s * s, 2.0 * c * s;
+            Eigen::RowVectorXd transformed = strainTransform * B_mls;
+
+            for (size_t i = 0; i < supportIds.size(); i++) {
+                int nodeId = supportIds[i];
+                G(g, nodeId * 2)     = transformed(i * 2);
+                G(g, nodeId * 2 + 1) = transformed(i * 2 + 1);
             }
         }
     }
@@ -394,6 +438,269 @@ std::vector<double> FESolver::getElementCenters(const CrossSection& section) con
         centers.push_back(cy / 4.0);
     }
     return centers;
+}
+
+void FESolver::addHole(CrossSection& section, const std::vector<Node2D>& polygon, double margin) {
+    Hole hole;
+    hole.polygon = polygon;
+    hole.margin = margin;
+    section.holes.push_back(hole);
+    markHoleBoundaryElements(section);
+}
+
+bool FESolver::isPointInPolygon(double x, double y, const std::vector<Node2D>& polygon) const {
+    int n = static_cast<int>(polygon.size());
+    if (n < 3) return false;
+
+    bool inside = false;
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+        const Node2D& pi = polygon[i];
+        const Node2D& pj = polygon[j];
+
+        if (((pi.y > y) != (pj.y > y)) &&
+            (x < (pj.x - pi.x) * (y - pi.y) / (pj.y - pi.y + 1e-12) + pi.x)) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+double FESolver::pointToPolygonDistance(double x, double y, const std::vector<Node2D>& polygon) const {
+    int n = static_cast<int>(polygon.size());
+    if (n == 0) return 1e10;
+
+    double minDist = 1e10;
+    for (int i = 0; i < n; i++) {
+        const Node2D& p1 = polygon[i];
+        const Node2D& p2 = polygon[(i + 1) % n];
+
+        double dx = p2.x - p1.x;
+        double dy = p2.y - p1.y;
+        double lenSq = dx * dx + dy * dy;
+
+        double t = 0.0;
+        if (lenSq > 1e-12) {
+            t = std::max(0.0, std::min(1.0, ((x - p1.x) * dx + (y - p1.y) * dy) / lenSq));
+        }
+
+        double px = p1.x + t * dx;
+        double py = p1.y + t * dy;
+        double dist = std::sqrt((x - px) * (x - px) + (y - py) * (y - py));
+        minDist = std::min(minDist, dist);
+    }
+
+    if (isPointInPolygon(x, y, polygon)) {
+        return -minDist;
+    }
+    return minDist;
+}
+
+bool FESolver::isElementNearHole(const QuadElement& elem, const std::vector<Node2D>& nodes, const Hole& hole) const {
+    for (int a = 0; a < 4; a++) {
+        const Node2D& nd = nodes[elem.nodeIds[a]];
+        double dist = std::abs(pointToPolygonDistance(nd.x, nd.y, hole.polygon));
+        if (dist < hole.margin) {
+            return true;
+        }
+    }
+
+    double cx = 0, cy = 0;
+    for (int a = 0; a < 4; a++) {
+        cx += nodes[elem.nodeIds[a]].x;
+        cy += nodes[elem.nodeIds[a]].y;
+    }
+    cx /= 4.0;
+    cy /= 4.0;
+    double centerDist = std::abs(pointToPolygonDistance(cx, cy, hole.polygon));
+
+    return centerDist < hole.margin * 1.5;
+}
+
+void FESolver::markHoleBoundaryElements(CrossSection& section) const {
+    if (section.holes.empty()) return;
+
+    for (QuadElement& elem : section.elements) {
+        elem.isHoleBoundary = false;
+        for (const Hole& hole : section.holes) {
+            if (isElementNearHole(elem, section.nodes, hole)) {
+                elem.isHoleBoundary = true;
+                break;
+            }
+        }
+    }
+}
+
+double FESolver::gaussianWeight(double r, double dm) const {
+    if (r > dm || dm < 1e-12) return 0.0;
+    double ratio = r / dm;
+    return std::exp(-(ratio * ratio) * 4.0);
+}
+
+std::vector<int> FESolver::findSupportNodes(const std::vector<Node2D>& nodes, double x, double y, double dm) const {
+    std::vector<int> supportIds;
+    supportIds.reserve(25);
+
+    for (const Node2D& nd : nodes) {
+        double dx = nd.x - x;
+        double dy = nd.y - y;
+        double dist = std::sqrt(dx * dx + dy * dy);
+        if (dist <= dm) {
+            supportIds.push_back(nd.id);
+        }
+    }
+
+    if (supportIds.size() < 6) {
+        std::vector<std::pair<double, int>> distPairs;
+        distPairs.reserve(nodes.size());
+        for (const Node2D& nd : nodes) {
+            double dx = nd.x - x;
+            double dy = nd.y - y;
+            double dist = std::sqrt(dx * dx + dy * dy);
+            distPairs.emplace_back(dist, nd.id);
+        }
+        std::partial_sort(distPairs.begin(), distPairs.begin() + std::min(size_t(12), distPairs.size()), distPairs.end());
+        supportIds.clear();
+        for (size_t i = 0; i < std::min(size_t(12), distPairs.size()); i++) {
+            supportIds.push_back(distPairs[i].second);
+        }
+    }
+
+    return supportIds;
+}
+
+Eigen::MatrixXd FESolver::buildMLSBasisMatrix(double x, double y) const {
+    Eigen::MatrixXd P(1, 6);
+    P << 1.0, x, y, x * x, x * y, y * y;
+    return P;
+}
+
+Eigen::MatrixXd FESolver::buildMLSWeightMatrix(
+    const std::vector<Node2D>& nodes,
+    const std::vector<int>& supportNodeIds,
+    double x, double y, double dm) const {
+
+    int n = static_cast<int>(supportNodeIds.size());
+    Eigen::DiagonalMatrix<double, Eigen::Dynamic> W(n);
+
+    for (int i = 0; i < n; i++) {
+        const Node2D& nd = nodes[supportNodeIds[i]];
+        double dx = nd.x - x;
+        double dy = nd.y - y;
+        double dist = std::sqrt(dx * dx + dy * dy);
+        W.diagonal()(i) = gaussianWeight(dist, dm);
+    }
+
+    return W;
+}
+
+Eigen::MatrixXd FESolver::buildMLSShapeFunction(
+    const std::vector<Node2D>& nodes,
+    const std::vector<int>& supportNodeIds,
+    double x, double y, double dm) const {
+
+    int n = static_cast<int>(supportNodeIds.size());
+    int basisSize = 6;
+
+    Eigen::MatrixXd P(n, basisSize);
+    for (int i = 0; i < n; i++) {
+        const Node2D& nd = nodes[supportNodeIds[i]];
+        P(i, 0) = 1.0;
+        P(i, 1) = nd.x;
+        P(i, 2) = nd.y;
+        P(i, 3) = nd.x * nd.x;
+        P(i, 4) = nd.x * nd.y;
+        P(i, 5) = nd.y * nd.y;
+    }
+
+    Eigen::DiagonalMatrix<double, Eigen::Dynamic> W = buildMLSWeightMatrix(nodes, supportNodeIds, x, y, dm);
+
+    Eigen::MatrixXd A = P.transpose() * W * P;
+    Eigen::MatrixXd b = buildMLSBasisMatrix(x, y);
+
+    double regularization = 1e-8;
+    A += regularization * Eigen::MatrixXd::Identity(basisSize, basisSize);
+
+    Eigen::MatrixXd coeffs = A.ldlt().solve(b.transpose());
+    Eigen::MatrixXd phi = W * P * coeffs;
+
+    return phi;
+}
+
+Eigen::MatrixXd FESolver::buildMLSStrainDisplacementMatrix(
+    const CrossSection& section,
+    const std::vector<int>& supportNodeIds,
+    double x, double y, double dm,
+    double gaugeAngle) const {
+
+    int n = static_cast<int>(supportNodeIds.size());
+    int basisSize = 6;
+
+    Eigen::MatrixXd P(n, basisSize);
+    Eigen::MatrixXd dPdx(n, basisSize);
+    Eigen::MatrixXd dPdy(n, basisSize);
+
+    for (int i = 0; i < n; i++) {
+        const Node2D& nd = section.nodes[supportNodeIds[i]];
+        P(i, 0) = 1.0;
+        P(i, 1) = nd.x;
+        P(i, 2) = nd.y;
+        P(i, 3) = nd.x * nd.x;
+        P(i, 4) = nd.x * nd.y;
+        P(i, 5) = nd.y * nd.y;
+
+        dPdx(i, 0) = 0.0;
+        dPdx(i, 1) = 1.0;
+        dPdx(i, 2) = 0.0;
+        dPdx(i, 3) = 2.0 * nd.x;
+        dPdx(i, 4) = nd.y;
+        dPdx(i, 5) = 0.0;
+
+        dPdy(i, 0) = 0.0;
+        dPdy(i, 1) = 0.0;
+        dPdy(i, 2) = 1.0;
+        dPdy(i, 3) = 0.0;
+        dPdy(i, 4) = nd.x;
+        dPdy(i, 5) = 2.0 * nd.y;
+    }
+
+    Eigen::DiagonalMatrix<double, Eigen::Dynamic> W = buildMLSWeightMatrix(section.nodes, supportNodeIds, x, y, dm);
+
+    Eigen::MatrixXd A = P.transpose() * W * P;
+    double regularization = 1e-8;
+    A += regularization * Eigen::MatrixXd::Identity(basisSize, basisSize);
+    auto A_solver = A.ldlt();
+
+    Eigen::MatrixXd b = buildMLSBasisMatrix(x, y);
+    Eigen::MatrixXd coeffs = A_solver.solve(b.transpose());
+
+    Eigen::MatrixXd dbdx(1, 6);
+    dbdx << 0.0, 1.0, 0.0, 2.0 * x, y, 0.0;
+    Eigen::MatrixXd dbdy(1, 6);
+    dbdy << 0.0, 0.0, 1.0, 0.0, x, 2.0 * y;
+
+    Eigen::MatrixXd dcoeffsdx = A_solver.solve(dbdx.transpose());
+    Eigen::MatrixXd dcoeffsdy = A_solver.solve(dbdy.transpose());
+
+    Eigen::MatrixXd dphidx = W * (dPdx * coeffs + P * dcoeffsdx);
+    Eigen::MatrixXd dphidy = W * (dPdy * coeffs + P * dcoeffsdy);
+
+    Eigen::MatrixXd B(3, n * 2);
+    B.setZero();
+
+    for (int i = 0; i < n; i++) {
+        int idx = i * 2;
+        double dphi_dx = dphidx(i, 0);
+        double dphi_dy = dphidy(i, 0);
+
+        B(0, idx)     = dphi_dx;
+        B(0, idx + 1) = 0.0;
+        B(1, idx)     = 0.0;
+        B(1, idx + 1) = dphi_dy;
+        B(2, idx)     = dphi_dy;
+        B(2, idx + 1) = dphi_dx;
+    }
+
+    return B;
 }
 
 }

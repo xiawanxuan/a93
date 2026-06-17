@@ -23,6 +23,12 @@ const electronAPI = {
   ): Promise<CrossSection> =>
     ipcRenderer.invoke(IPC_CHANNELS.FE_CREATE_SECTION, width, height, divX, divY, E, nu, gauges),
 
+  feAddHole: (
+    polygon: Array<{ x: number; y: number }>,
+    margin?: number
+  ): Promise<{ success: boolean; holeCount: number; holeBoundaryElements: number[]; holeBoundaryCount: number }> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FE_ADD_HOLE, polygon, margin),
+
   feSolveInverse: (strains: Record<string, number>): Promise<FEResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.FE_SOLVE_INVERSE, strains),
 

@@ -422,6 +422,60 @@ export const mockApi = {
     });
   },
 
+  feAddHole: (
+    polygon: Array<{ x: number; y: number }>,
+    margin?: number
+  ): Promise<{ success: boolean; holeCount: number; holeBoundaryElements: number[]; holeBoundaryCount: number }> => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const boundaryElems: number[] = [];
+        if (currentSection) {
+          const m = margin || 0.02;
+
+          for (let e = 0; e < currentSection.elements.length; e++) {
+            const elem = currentSection.elements[e];
+            const cx = (
+              currentSection.nodes[elem.nodeIds[0]].x +
+              currentSection.nodes[elem.nodeIds[2]].x
+            ) / 2;
+            const cy = (
+              currentSection.nodes[elem.nodeIds[0]].y +
+              currentSection.nodes[elem.nodeIds[2]].y
+            ) / 2;
+
+            let minDist = Infinity;
+            for (let i = 0; i < polygon.length; i++) {
+              const p1 = polygon[i];
+              const p2 = polygon[(i + 1) % polygon.length];
+              const dx = p2.x - p1.x;
+              const dy = p2.y - p1.y;
+              const lenSq = dx * dx + dy * dy;
+              let t = 0;
+              if (lenSq > 1e-12) {
+                t = Math.max(0, Math.min(1, ((cx - p1.x) * dx + (cy - p1.y) * dy) / lenSq));
+              }
+              const px = p1.x + t * dx;
+              const py = p1.y + t * dy;
+              const dist = Math.sqrt((cx - px) ** 2 + (cy - py) ** 2);
+              minDist = Math.min(minDist, dist);
+            }
+
+            if (minDist < m * 1.5) {
+              boundaryElems.push(e);
+              elem.isHoleBoundary = true;
+            }
+          }
+        }
+        resolve({
+          success: true,
+          holeCount: 1,
+          holeBoundaryElements: boundaryElems,
+          holeBoundaryCount: boundaryElems.length,
+        });
+      }, 30);
+    });
+  },
+
   feSolveInverse: (strains: Record<string, number>): Promise<FEResult> => {
     return new Promise((resolve) => {
       setTimeout(() => {
